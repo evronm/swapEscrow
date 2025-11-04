@@ -392,6 +392,46 @@
             "function withdrawExpired()"
         ];
 
+        // Deployed contract addresses by chain ID
+        const DEPLOYMENTS = {
+            31337: "0x5FbDB2315678afecb367f032d93F642f64180aa3", // Anvil localhost
+            // Add more chains as you deploy:
+            // 1: "0x...", // Ethereum Mainnet
+            // 11155111: "0x...", // Sepolia
+            // 137: "0x...", // Polygon
+            // 8453: "0x..." // Base
+        };
+
+        const CHAIN_NAMES = {
+            1: "Ethereum Mainnet",
+            11155111: "Sepolia",
+            137: "Polygon",
+            8453: "Base",
+            31337: "Anvil (localhost)"
+        };
+
+        // Auto-load factory address based on chain
+        async function loadFactoryAddress() {
+            try {
+                const network = await provider.getNetwork();
+                const chainId = network.chainId;
+                const factoryAddr = DEPLOYMENTS[chainId];
+
+                if (factoryAddr) {
+                    document.getElementById('factoryAddress').value = factoryAddr;
+                    factoryContract = new ethers.Contract(factoryAddr, FACTORY_ABI, signer);
+
+                    const chainName = CHAIN_NAMES[chainId] || `Chain ${chainId}`;
+                    showAlert(`Connected to ${chainName}. Factory loaded at ${factoryAddr}`, 'success');
+                } else {
+                    const chainName = CHAIN_NAMES[chainId] || `Chain ${chainId}`;
+                    showAlert(`Connected to ${chainName}. No factory deployed on this chain yet. Please enter address manually.`, 'info');
+                }
+            } catch (error) {
+                console.error('Error loading factory address:', error);
+            }
+        }
+
         // Connect Wallet
         document.getElementById('connectBtn').addEventListener('click', async () => {
             try {
@@ -409,7 +449,8 @@
                 document.getElementById('notConnected').classList.add('hidden');
                 document.getElementById('connected').classList.remove('hidden');
 
-                showAlert('Wallet connected successfully!', 'success');
+                // Auto-load factory address for this chain
+                await loadFactoryAddress();
             } catch (error) {
                 showAlert(`Error: ${error.message}`, 'error');
             }
