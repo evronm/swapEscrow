@@ -257,7 +257,7 @@
             <p>Connect your wallet to create and manage escrow contracts for trustless token swaps.</p>
             <p style="margin-top: 10px;"><strong>Features:</strong></p>
             <ul style="margin-left: 20px; margin-top: 10px;">
-                <li>Support for ERC20, ERC721, and ERC1155 tokens</li>
+                <li>Support for Native ETH, ERC20, ERC721, and ERC1155 tokens</li>
                 <li>Time-locked atomic swaps</li>
                 <li>Multiple asset deposits</li>
                 <li>Automatic expiry refunds</li>
@@ -278,7 +278,6 @@
             <div class="tabs">
                 <div class="tab active" data-tab="create">Create Escrow</div>
                 <div class="tab" data-tab="my-escrows">My Escrows</div>
-                <div class="tab" data-tab="interact">Interact with Escrow</div>
             </div>
 
             <!-- Create Escrow Tab -->
@@ -294,15 +293,17 @@
                 <div class="form-group">
                     <label>Payment Asset Type:</label>
                     <select id="paymentType">
-                        <option value="0">ERC20</option>
-                        <option value="1">ERC721</option>
-                        <option value="2">ERC1155</option>
+                        <option value="0">Native ETH</option>
+                        <option value="1">ERC20</option>
+                        <option value="2">ERC721</option>
+                        <option value="3">ERC1155</option>
                     </select>
                 </div>
 
                 <div class="form-group">
                     <label>Payment Token Address:</label>
                     <input type="text" id="paymentToken" placeholder="0x...">
+                    <p class="help-text">Use 0x0000000000000000000000000000000000000000 for Native ETH</p>
                 </div>
 
                 <div class="form-group">
@@ -314,7 +315,7 @@
                 <div class="form-group">
                     <label>Payment Amount:</label>
                     <input type="text" id="paymentAmount" placeholder="1000000000000000000">
-                    <p class="help-text">In wei for ERC20, or quantity for ERC1155. Ignored for ERC721.</p>
+                    <p class="help-text">In wei for Native ETH and ERC20, or quantity for ERC1155. Ignored for ERC721.</p>
                 </div>
 
                 <button id="createEscrowBtn">Create Escrow</button>
@@ -326,47 +327,11 @@
                 <button id="loadEscrowsBtn" style="margin-bottom: 15px;">Load My Escrows</button>
                 <div id="escrowList" class="grid"></div>
             </div>
-
-            <!-- Interact Tab -->
-            <div id="interactTab" class="card hidden">
-                <h2>Interact with Escrow</h2>
-
-                <div class="form-group">
-                    <label>Escrow Address:</label>
-                    <input type="text" id="escrowAddress" placeholder="0x...">
-                </div>
-
-                <button id="loadEscrowBtn" style="margin-bottom: 20px;">Load Escrow Info</button>
-
-                <div id="escrowInfo" class="hidden">
-                    <h3 style="margin-bottom: 15px;">Escrow Details</h3>
-                    <div id="escrowDetails"></div>
-
-                    <h3 style="margin-top: 20px; margin-bottom: 15px;">Actions</h3>
-
-                    <div class="form-group">
-                        <label>For ERC20 Deposits/Payments:</label>
-                        <input type="text" id="erc20Token" placeholder="Token Address">
-                        <input type="text" id="erc20Amount" placeholder="Amount" style="margin-top: 5px;">
-                        <input type="text" id="erc20Depositor" placeholder="Depositor Address" style="margin-top: 5px;">
-                        <button id="processERC20Btn" style="margin-top: 10px;">Process ERC20</button>
-                    </div>
-
-                    <div style="margin-top: 20px;">
-                        <button id="withdrawExpiredBtn">Withdraw Expired Assets</button>
-                    </div>
-
-                    <div style="margin-top: 20px;">
-                        <h3 style="margin-bottom: 10px;">Deposited Assets</h3>
-                        <div id="depositedAssets"></div>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
     <script>
-        let provider, signer, account, factoryContract, escrowContract;
+        let provider, signer, account, factoryContract;
 
         const FACTORY_ABI = [
             "function createEscrow(uint256 duration, uint8 paymentAssetType, address paymentToken, uint256 paymentTokenId, uint256 paymentAmount) returns (address)",
@@ -560,9 +525,6 @@
                         <p><strong>Assets Deposited:</strong> ${assetCount.toString()}</p>
                         ${expiryTime.gt(0) ? `<p><strong>Expires:</strong> ${new Date(expiryTime.toNumber() * 1000).toLocaleString()}</p>` : ''}
                         <span class="status ${status}">${statusText}</span>
-                        <div class="action-buttons">
-                            <button onclick="viewEscrow('${escrowAddr}')">View Details</button>
-                        </div>
                     `;
                     escrowList.appendChild(item);
                 }
@@ -573,129 +535,44 @@
             }
         });
 
-        // Load Escrow Info
-        document.getElementById('loadEscrowBtn').addEventListener('click', async () => {
-            const address = document.getElementById('escrowAddress').value;
-            if (!ethers.utils.isAddress(address)) {
-                showAlert('Invalid escrow address', 'error');
-                return;
+        // Update field visibility based on payment type
+        function updatePaymentFieldsVisibility() {
+            const paymentType = document.getElementById('paymentType').value;
+            const tokenAddressGroup = document.getElementById('paymentToken').parentElement;
+            const tokenIdGroup = document.getElementById('paymentTokenId').parentElement;
+            const amountGroup = document.getElementById('paymentAmount').parentElement;
+
+            // Reset all to visible first
+            tokenAddressGroup.style.display = 'block';
+            tokenIdGroup.style.display = 'block';
+            amountGroup.style.display = 'block';
+
+            // 0 = NATIVE, 1 = ERC20, 2 = ERC721, 3 = ERC1155
+            if (paymentType === '0') {
+                // Native ETH: only amount
+                tokenAddressGroup.style.display = 'none';
+                tokenIdGroup.style.display = 'none';
+                document.getElementById('paymentToken').value = '0x0000000000000000000000000000000000000000';
+                document.getElementById('paymentTokenId').value = '0';
+            } else if (paymentType === '1') {
+                // ERC20: token address and amount
+                tokenIdGroup.style.display = 'none';
+                document.getElementById('paymentTokenId').value = '0';
+            } else if (paymentType === '2') {
+                // ERC721: token address and token ID
+                amountGroup.style.display = 'none';
+                document.getElementById('paymentAmount').value = '0';
+            } else if (paymentType === '3') {
+                // ERC1155: all fields
+                // All visible
             }
+        }
 
-            try {
-                escrowContract = new ethers.Contract(address, ESCROW_ABI, signer);
+        // Listen for payment type changes
+        document.getElementById('paymentType').addEventListener('change', updatePaymentFieldsVisibility);
 
-                const [duration, paymentAssetType, paymentToken, paymentTokenId, paymentAmount, completed, expiryTime, firstDepositor, assetCount] = await Promise.all([
-                    escrowContract.duration(),
-                    escrowContract.paymentAssetType(),
-                    escrowContract.paymentToken(),
-                    escrowContract.paymentTokenId(),
-                    escrowContract.paymentAmount(),
-                    escrowContract.completed(),
-                    escrowContract.expiryTime(),
-                    escrowContract.firstDepositor(),
-                    escrowContract.getDepositedAssetsCount()
-                ]);
-
-                const assetTypes = ['ERC20', 'ERC721', 'ERC1155'];
-                const now = Math.floor(Date.now() / 1000);
-                const expired = expiryTime.gt(0) && now > expiryTime.toNumber();
-
-                document.getElementById('escrowDetails').innerHTML = `
-                    <p><strong>Duration:</strong> ${duration.toString()} seconds</p>
-                    <p><strong>Payment Type:</strong> ${assetTypes[paymentAssetType]}</p>
-                    <p><strong>Payment Token:</strong> <span class="address">${paymentToken}</span></p>
-                    <p><strong>Payment Token ID:</strong> ${paymentTokenId.toString()}</p>
-                    <p><strong>Payment Amount:</strong> ${ethers.utils.formatUnits(paymentAmount, 0)}</p>
-                    <p><strong>Status:</strong> ${completed ? 'Completed' : expired ? 'Expired' : 'Active'}</p>
-                    ${expiryTime.gt(0) ? `<p><strong>Expiry:</strong> ${new Date(expiryTime.toNumber() * 1000).toLocaleString()}</p>` : '<p><strong>Expiry:</strong> Not started (no deposits yet)</p>'}
-                    <p><strong>First Depositor:</strong> ${firstDepositor === ethers.constants.AddressZero ? 'None' : firstDepositor}</p>
-                    <p><strong>Assets Count:</strong> ${assetCount.toString()}</p>
-                `;
-
-                // Load deposited assets
-                const assetsDiv = document.getElementById('depositedAssets');
-                assetsDiv.innerHTML = '';
-
-                if (assetCount.gt(0)) {
-                    for (let i = 0; i < assetCount.toNumber(); i++) {
-                        const asset = await escrowContract.getDepositedAsset(i);
-                        const assetDiv = document.createElement('div');
-                        assetDiv.className = 'escrow-item';
-                        assetDiv.style.marginBottom = '10px';
-                        assetDiv.innerHTML = `
-                            <p><strong>Asset #${i + 1}</strong></p>
-                            <p><strong>Type:</strong> ${assetTypes[asset.assetType]}</p>
-                            <p><strong>Token:</strong> <span class="address">${asset.tokenAddress}</span></p>
-                            <p><strong>Token ID:</strong> ${asset.tokenId.toString()}</p>
-                            <p><strong>Amount:</strong> ${ethers.utils.formatUnits(asset.amount, 0)}</p>
-                            <p><strong>Depositor:</strong> ${asset.depositor.substring(0, 10)}...</p>
-                        `;
-                        assetsDiv.appendChild(assetDiv);
-                    }
-                } else {
-                    assetsDiv.innerHTML = '<p>No assets deposited yet.</p>';
-                }
-
-                document.getElementById('escrowInfo').classList.remove('hidden');
-                showAlert('Escrow loaded successfully!', 'success');
-            } catch (error) {
-                showAlert(`Error: ${error.message}`, 'error');
-            }
-        });
-
-        // Process ERC20
-        document.getElementById('processERC20Btn').addEventListener('click', async () => {
-            if (!escrowContract) {
-                showAlert('Please load an escrow first', 'error');
-                return;
-            }
-
-            try {
-                const token = document.getElementById('erc20Token').value;
-                const depositor = document.getElementById('erc20Depositor').value;
-
-                if (!ethers.utils.isAddress(token) || !ethers.utils.isAddress(depositor)) {
-                    showAlert('Invalid token or depositor address', 'error');
-                    return;
-                }
-
-                showAlert('Processing ERC20... Please confirm transaction', 'info');
-                const tx = await escrowContract.process(token, depositor);
-
-                showAlert('Transaction submitted. Waiting for confirmation...', 'info');
-                await tx.wait();
-
-                showAlert('ERC20 processed successfully!', 'success');
-
-                // Reload escrow info
-                document.getElementById('loadEscrowBtn').click();
-            } catch (error) {
-                showAlert(`Error: ${error.message}`, 'error');
-            }
-        });
-
-        // Withdraw Expired
-        document.getElementById('withdrawExpiredBtn').addEventListener('click', async () => {
-            if (!escrowContract) {
-                showAlert('Please load an escrow first', 'error');
-                return;
-            }
-
-            try {
-                showAlert('Withdrawing expired assets... Please confirm transaction', 'info');
-                const tx = await escrowContract.withdrawExpired();
-
-                showAlert('Transaction submitted. Waiting for confirmation...', 'info');
-                await tx.wait();
-
-                showAlert('Assets withdrawn successfully!', 'success');
-
-                // Reload escrow info
-                document.getElementById('loadEscrowBtn').click();
-            } catch (error) {
-                showAlert(`Error: ${error.message}`, 'error');
-            }
-        });
+        // Initialize on page load
+        updatePaymentFieldsVisibility();
 
         // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -707,26 +584,14 @@
 
                 document.getElementById('createTab').classList.add('hidden');
                 document.getElementById('myEscrowsTab').classList.add('hidden');
-                document.getElementById('interactTab').classList.add('hidden');
 
                 if (tabName === 'create') {
                     document.getElementById('createTab').classList.remove('hidden');
                 } else if (tabName === 'my-escrows') {
                     document.getElementById('myEscrowsTab').classList.remove('hidden');
-                } else if (tabName === 'interact') {
-                    document.getElementById('interactTab').classList.remove('hidden');
                 }
             });
         });
-
-        // Helper function to view escrow
-        function viewEscrow(address) {
-            document.querySelector('[data-tab="interact"]').click();
-            document.getElementById('escrowAddress').value = address;
-            setTimeout(() => {
-                document.getElementById('loadEscrowBtn').click();
-            }, 100);
-        }
 
         // Alert helpers
         function showAlert(message, type) {

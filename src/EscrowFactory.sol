@@ -37,10 +37,10 @@ contract EscrowFactory {
     /**
      * @notice Create a new escrow contract
      * @param duration Time lock duration in seconds
-     * @param paymentAssetType Type of asset expected as payment (0=ERC20, 1=ERC721, 2=ERC1155)
-     * @param paymentToken Address of the token expected as payment
-     * @param paymentTokenId Token ID for ERC721/ERC1155 payment (0 for ERC20)
-     * @param paymentAmount Amount for ERC20/ERC1155 payment (ignored for ERC721)
+     * @param paymentAssetType Type of asset expected as payment (0=NATIVE, 1=ERC20, 2=ERC721, 3=ERC1155)
+     * @param paymentToken Address of the token expected as payment (use address(0) for NATIVE ETH)
+     * @param paymentTokenId Token ID for ERC721/ERC1155 payment (0 for NATIVE/ERC20)
+     * @param paymentAmount Amount for NATIVE/ERC20/ERC1155 payment (ignored for ERC721)
      * @return The address of the newly created escrow contract
      */
     function createEscrow(
@@ -51,7 +51,7 @@ contract EscrowFactory {
         uint256 paymentAmount
     ) external returns (address) {
         // Clone the implementation
-        address clone = Clones.clone(escrowImplementation);
+        address payable clone = payable(Clones.clone(escrowImplementation));
 
         // Initialize the escrow
         Escrow(clone).initialize(

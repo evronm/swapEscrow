@@ -74,7 +74,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits NFT
         vm.startPrank(seller);
@@ -107,7 +107,7 @@ contract EscrowTest is Test {
             0,
             200 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits multiple NFTs
         vm.startPrank(seller);
@@ -139,7 +139,7 @@ contract EscrowTest is Test {
             2,
             0
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits NFT 0
         vm.prank(seller);
@@ -164,7 +164,7 @@ contract EscrowTest is Test {
             2,
             50
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits 100 of token ID 1
         vm.prank(seller);
@@ -191,7 +191,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits NFT
         vm.prank(seller);
@@ -217,7 +217,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits NFT
         vm.prank(seller);
@@ -226,18 +226,15 @@ contract EscrowTest is Test {
         // Fast forward past expiry
         vm.warp(block.timestamp + 2 hours);
 
-        // Try to pay - should just add as deposit, not trigger swap
+        // Try to pay - should revert with EscrowExpired
         vm.startPrank(buyer);
         token.transfer(escrowAddr, 100 ether);
+        vm.expectRevert(Escrow.EscrowExpired.selector);
         escrow.process(address(token), buyer);
         vm.stopPrank();
-
-        // Should not be completed (payment rejected after expiry)
-        assertFalse(escrow.completed());
-        assertEq(escrow.getDepositedAssetsCount(), 2); // NFT + ERC20 deposit
     }
 
-    function testProcessAfterExpiryTracksDeposit() public {
+    function testCannotDepositAfterExpiry() public {
         // Create escrow
         address escrowAddr = factory.createEscrow(
             1 hours,
@@ -246,7 +243,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits NFT
         vm.prank(seller);
@@ -255,19 +252,17 @@ contract EscrowTest is Test {
         // Fast forward past expiry
         vm.warp(block.timestamp + 2 hours);
 
-        // Someone sends tokens after expiry
+        // Someone tries to send tokens after expiry - should revert
         vm.prank(buyer);
         token.transfer(escrowAddr, 50 ether);
 
+        vm.expectRevert(Escrow.EscrowExpired.selector);
         escrow.process(address(token), buyer);
 
-        // Should be tracked as deposit
-        assertEq(escrow.getDepositedAssetsCount(), 2);
-
-        // Withdraw should return both
-        escrow.withdrawExpired();
-        assertEq(nft.ownerOf(0), seller);
-        assertEq(token.balanceOf(buyer), 1000 ether - 50 ether + 50 ether); // Got refund
+        // NFT deposit should still work
+        vm.prank(seller);
+        vm.expectRevert(Escrow.EscrowExpired.selector);
+        nft.safeTransferFrom(seller, escrowAddr, 1);
     }
 
     function testWrongPaymentAmount() public {
@@ -279,7 +274,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits NFT
         vm.prank(seller);
@@ -305,7 +300,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Seller deposits NFT
         vm.prank(seller);
@@ -325,7 +320,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // First seller deposits some tokens
         vm.startPrank(seller);
@@ -366,7 +361,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Try to process without any transfers
         vm.expectRevert(Escrow.NothingToProcess.selector);
@@ -382,7 +377,7 @@ contract EscrowTest is Test {
             0,
             100 ether
         );
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         // Complete the escrow
         vm.prank(seller);
@@ -399,5 +394,129 @@ contract EscrowTest is Test {
         vm.prank(seller);
         vm.expectRevert(Escrow.EscrowAlreadyCompleted.selector);
         nft.safeTransferFrom(seller, escrowAddr, 1);
+    }
+
+    function testNFTForETH() public {
+        // Create escrow: expects 1 ETH as payment
+        address escrowAddr = factory.createEscrow(
+            1 days,
+            Escrow.AssetType.NATIVE,
+            address(0),
+            0,
+            1 ether
+        );
+        Escrow escrow = Escrow(payable(escrowAddr));
+
+        // Seller deposits NFT
+        vm.prank(seller);
+        nft.safeTransferFrom(seller, escrowAddr, 0);
+
+        // Verify deposit
+        assertEq(escrow.getDepositedAssetsCount(), 1);
+        assertEq(escrow.firstDepositor(), seller);
+
+        // Buyer sends ETH
+        uint256 sellerBalanceBefore = seller.balance;
+        vm.prank(buyer);
+        vm.deal(buyer, 10 ether);
+        (bool success, ) = escrowAddr.call{value: 1 ether}("");
+        require(success);
+
+        // Verify swap completed
+        assertTrue(escrow.completed());
+        assertEq(nft.ownerOf(0), buyer);
+        assertEq(seller.balance, sellerBalanceBefore + 1 ether);
+    }
+
+    function testMultipleNFTsForETH() public {
+        // Create escrow: expects 5 ETH as payment
+        address escrowAddr = factory.createEscrow(
+            1 days,
+            Escrow.AssetType.NATIVE,
+            address(0),
+            0,
+            5 ether
+        );
+        Escrow escrow = Escrow(payable(escrowAddr));
+
+        // Seller deposits multiple NFTs
+        vm.startPrank(seller);
+        nft.safeTransferFrom(seller, escrowAddr, 0);
+        nft.safeTransferFrom(seller, escrowAddr, 1);
+        vm.stopPrank();
+
+        assertEq(escrow.getDepositedAssetsCount(), 2);
+
+        // Buyer pays with ETH
+        uint256 sellerBalanceBefore = seller.balance;
+        vm.prank(buyer);
+        vm.deal(buyer, 10 ether);
+        (bool success, ) = escrowAddr.call{value: 5 ether}("");
+        require(success);
+
+        // Verify both NFTs transferred
+        assertTrue(escrow.completed());
+        assertEq(nft.ownerOf(0), buyer);
+        assertEq(nft.ownerOf(1), buyer);
+        assertEq(seller.balance, sellerBalanceBefore + 5 ether);
+    }
+
+    function testETHDeposit() public {
+        // Create escrow: expects ERC20 payment
+        address escrowAddr = factory.createEscrow(
+            1 days,
+            Escrow.AssetType.ERC20,
+            address(token),
+            0,
+            100 ether
+        );
+        Escrow escrow = Escrow(payable(escrowAddr));
+
+        // Seller deposits ETH (not payment, just deposit)
+        vm.prank(seller);
+        vm.deal(seller, 10 ether);
+        (bool success, ) = escrowAddr.call{value: 2 ether}("");
+        require(success);
+
+        // Should be added as deposit
+        assertEq(escrow.getDepositedAssetsCount(), 1);
+        assertFalse(escrow.completed());
+
+        // Buyer pays with ERC20
+        vm.startPrank(buyer);
+        token.transfer(escrowAddr, 100 ether);
+        escrow.process(address(token), buyer);
+        vm.stopPrank();
+
+        // Swap should complete, buyer gets the ETH deposit
+        assertTrue(escrow.completed());
+        assertEq(buyer.balance, 2 ether);
+        assertEq(token.balanceOf(seller), 1100 ether);
+    }
+
+    function testWrongETHAmount() public {
+        // Create escrow: expects 5 ETH
+        address escrowAddr = factory.createEscrow(
+            1 days,
+            Escrow.AssetType.NATIVE,
+            address(0),
+            0,
+            5 ether
+        );
+        Escrow escrow = Escrow(payable(escrowAddr));
+
+        // Seller deposits NFT
+        vm.prank(seller);
+        nft.safeTransferFrom(seller, escrowAddr, 0);
+
+        // Buyer sends wrong amount - should be treated as deposit
+        vm.prank(buyer);
+        vm.deal(buyer, 10 ether);
+        (bool success, ) = escrowAddr.call{value: 3 ether}("");
+        require(success);
+
+        // Should not complete swap
+        assertFalse(escrow.completed());
+        assertEq(escrow.getDepositedAssetsCount(), 2);
     }
 }

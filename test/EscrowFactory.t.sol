@@ -85,17 +85,17 @@ contract EscrowFactoryTest is Test {
         assertEq(factory.getEscrow(2), escrow3);
 
         // Verify each escrow is initialized correctly
-        Escrow e1 = Escrow(escrow1);
+        Escrow e1 = Escrow(payable(escrow1));
         assertEq(e1.duration(), 1 days);
         assertEq(uint(e1.paymentAssetType()), uint(Escrow.AssetType.ERC20));
         assertEq(e1.paymentAmount(), 100 ether);
 
-        Escrow e2 = Escrow(escrow2);
+        Escrow e2 = Escrow(payable(escrow2));
         assertEq(e2.duration(), 2 days);
         assertEq(uint(e2.paymentAssetType()), uint(Escrow.AssetType.ERC721));
         assertEq(e2.paymentTokenId(), 5);
 
-        Escrow e3 = Escrow(escrow3);
+        Escrow e3 = Escrow(payable(escrow3));
         assertEq(e3.duration(), 3 days);
         assertEq(uint(e3.paymentAssetType()), uint(Escrow.AssetType.ERC1155));
         assertEq(e3.paymentTokenId(), 10);
@@ -123,8 +123,8 @@ contract EscrowFactoryTest is Test {
         assertTrue(escrow1 != escrow2);
 
         // Verify they have independent state
-        Escrow e1 = Escrow(escrow1);
-        Escrow e2 = Escrow(escrow2);
+        Escrow e1 = Escrow(payable(escrow1));
+        Escrow e2 = Escrow(payable(escrow2));
 
         assertEq(e1.paymentAmount(), 100 ether);
         assertEq(e2.paymentAmount(), 200 ether);
@@ -175,7 +175,7 @@ contract EscrowFactoryTest is Test {
             100 ether
         );
 
-        Escrow escrow = Escrow(escrowAddr);
+        Escrow escrow = Escrow(payable(escrowAddr));
 
         vm.expectRevert(Escrow.AlreadyInitialized.selector);
         escrow.initialize(

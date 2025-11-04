@@ -24,7 +24,7 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
     error TransferFailed();
     error NothingToProcess();
 
-    enum AssetType { ERC20, ERC721, ERC1155 }
+    enum AssetType { NATIVE, ERC20, ERC721, ERC1155 }
 
     struct DepositedAsset {
         AssetType assetType;
@@ -51,13 +51,16 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
     // Track processed ERC20 balances to avoid double-counting
     mapping(address => uint256) public processedERC20;
 
+    // Track processed ETH to avoid double-counting
+    uint256 public processedETH;
+
     /**
      * @notice Initialize the escrow contract (called by factory)
      * @param _duration Time lock duration in seconds
-     * @param _paymentAssetType Type of asset expected as payment (0=ERC20, 1=ERC721, 2=ERC1155)
-     * @param _paymentToken Address of the token expected as payment
-     * @param _paymentTokenId Token ID for ERC721/ERC1155 payment (0 for ERC20)
-     * @param _paymentAmount Amount for ERC20/ERC1155 payment (ignored for ERC721)
+     * @param _paymentAssetType Type of asset expected as payment (0=NATIVE, 1=ERC20, 2=ERC721, 3=ERC1155)
+     * @param _paymentToken Address of the token expected as payment (use address(0) for NATIVE ETH)
+     * @param _paymentTokenId Token ID for ERC721/ERC1155 payment (0 for NATIVE/ERC20)
+     * @param _paymentAmount Amount for NATIVE/ERC20/ERC1155 payment (ignored for ERC721)
      */
     function initialize(
         uint256 _duration,
@@ -85,6 +88,7 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
     function process(address token, address depositor) external {
         if (!initialized) revert NotInitialized();
         if (completed) revert EscrowAlreadyCompleted();
+        if (expiryTime != 0 && block.timestamp >= expiryTime) revert EscrowExpired();
 
         // Check current balance vs processed balance
         uint256 currentBalance = IERC20(token).balanceOf(address(this));
@@ -94,18 +98,43 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
 
         uint256 newAmount = currentBalance - alreadyProcessed;
 
-        // If expired, only accept as deposit (payment window closed)
-        bool isExpired = expiryTime != 0 && block.timestamp >= expiryTime;
+        // Mark as processed first (before swap to prevent reentrancy)
+        processedERC20[token] = currentBalance;
 
-        // Check if this matches payment parameters (only before expiry)
-        if (!isExpired && _isPayment(AssetType.ERC20, token, 0, newAmount)) {
-            // Mark as processed first (before swap to prevent reentrancy)
-            processedERC20[token] = currentBalance;
+        // Check if this matches payment parameters
+        if (_isPayment(AssetType.ERC20, token, 0, newAmount)) {
             _executeSwap(depositor); // depositor here is actually the payer
         } else {
             // It's a deposit - add to locked assets
-            processedERC20[token] = currentBalance;
             _addDeposit(AssetType.ERC20, token, 0, newAmount, depositor);
+        }
+    }
+
+    /**
+     * @notice Receive function to automatically handle native ETH
+     */
+    receive() external payable {
+        if (!initialized) revert NotInitialized();
+        if (completed) revert EscrowAlreadyCompleted();
+        if (expiryTime != 0 && block.timestamp >= expiryTime) revert EscrowExpired();
+
+        // Check current balance vs processed balance
+        uint256 currentBalance = address(this).balance;
+        uint256 alreadyProcessed = processedETH;
+
+        if (currentBalance <= alreadyProcessed) revert NothingToProcess();
+
+        uint256 newAmount = currentBalance - alreadyProcessed;
+
+        // Mark as processed first
+        processedETH = currentBalance;
+
+        // Check if this matches payment parameters (use address(0) for native ETH)
+        if (_isPayment(AssetType.NATIVE, address(0), 0, newAmount)) {
+            _executeSwap(msg.sender);
+        } else {
+            // It's a deposit - add to locked assets
+            _addDeposit(AssetType.NATIVE, address(0), 0, newAmount, msg.sender);
         }
     }
 
@@ -160,6 +189,9 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
         // Check if token address matches
         if (token != paymentToken) return false;
 
+        // For NATIVE ETH and ERC20, check amount
+        if ((assetType == AssetType.NATIVE || assetType == AssetType.ERC20) && amount != paymentAmount) return false;
+
         // For ERC721, check token ID
         if (assetType == AssetType.ERC721 && tokenId != paymentTokenId) return false;
 
@@ -167,9 +199,6 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
         if (assetType == AssetType.ERC1155) {
             if (tokenId != paymentTokenId || amount != paymentAmount) return false;
         }
-
-        // For ERC20, check amount
-        if (assetType == AssetType.ERC20 && amount != paymentAmount) return false;
 
         return true;
     }
@@ -210,7 +239,10 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
         completed = true;
 
         // Transfer payment to first depositor
-        if (paymentAssetType == AssetType.ERC20) {
+        if (paymentAssetType == AssetType.NATIVE) {
+            (bool success, ) = firstDepositor.call{value: paymentAmount}("");
+            if (!success) revert TransferFailed();
+        } else if (paymentAssetType == AssetType.ERC20) {
             bool success = IERC20(paymentToken).transfer(firstDepositor, paymentAmount);
             if (!success) revert TransferFailed();
         } else if (paymentAssetType == AssetType.ERC721) {
@@ -235,7 +267,10 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
      * @dev Transfer a single asset to recipient
      */
     function _transferAsset(DepositedAsset memory asset, address recipient) internal {
-        if (asset.assetType == AssetType.ERC20) {
+        if (asset.assetType == AssetType.NATIVE) {
+            (bool success, ) = recipient.call{value: asset.amount}("");
+            if (!success) revert TransferFailed();
+        } else if (asset.assetType == AssetType.ERC20) {
             bool success = IERC20(asset.tokenAddress).transfer(recipient, asset.amount);
             if (!success) revert TransferFailed();
         } else if (asset.assetType == AssetType.ERC721) {
@@ -260,11 +295,10 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
     ) external override returns (bytes4) {
         if (!initialized) revert NotInitialized();
         if (completed) revert EscrowAlreadyCompleted();
+        if (expiryTime != 0 && block.timestamp >= expiryTime) revert EscrowExpired();
 
-        bool isExpired = expiryTime != 0 && block.timestamp >= expiryTime;
-
-        // Check if this is payment or deposit (only accept payment before expiry)
-        if (!isExpired && _isPayment(AssetType.ERC721, msg.sender, tokenId, 1)) {
+        // Check if this is payment or deposit
+        if (_isPayment(AssetType.ERC721, msg.sender, tokenId, 1)) {
             _executeSwap(from);
         } else {
             _addDeposit(AssetType.ERC721, msg.sender, tokenId, 1, from);
@@ -283,11 +317,10 @@ contract Escrow is IERC721Receiver, IERC1155Receiver {
     ) external override returns (bytes4) {
         if (!initialized) revert NotInitialized();
         if (completed) revert EscrowAlreadyCompleted();
+        if (expiryTime != 0 && block.timestamp >= expiryTime) revert EscrowExpired();
 
-        bool isExpired = expiryTime != 0 && block.timestamp >= expiryTime;
-
-        // Check if this is payment or deposit (only accept payment before expiry)
-        if (!isExpired && _isPayment(AssetType.ERC1155, msg.sender, tokenId, amount)) {
+        // Check if this is payment or deposit
+        if (_isPayment(AssetType.ERC1155, msg.sender, tokenId, amount)) {
             _executeSwap(from);
         } else {
             _addDeposit(AssetType.ERC1155, msg.sender, tokenId, amount, from);

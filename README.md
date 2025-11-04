@@ -4,14 +4,15 @@ A minimal, gas-optimized escrow system for trustless atomic swaps on Ethereum. B
 
 ## Features
 
-✅ **Multi-Token Support** - ERC20, ERC721, and ERC1155 tokens
-✅ **Automatic Detection** - Just transfer tokens to the contract
+✅ **Multi-Token Support** - Native ETH, ERC20, ERC721, and ERC1155 tokens
+✅ **Automatic Detection** - Just transfer tokens/ETH to the contract
 ✅ **Time-Locked Swaps** - First deposit starts timer, expiry returns assets
 ✅ **Multiple Assets** - Lock multiple NFTs/tokens in a single escrow
 ✅ **DAO Compatible** - Works with simple `token.transfer()` calls
 ✅ **Gas Optimized** - EIP-1167 minimal proxy pattern (~90% gas savings)
 ✅ **Reentrancy Protected** - CEI pattern enforced throughout
-✅ **Fully Tested** - 20 comprehensive test cases
+✅ **Fully Tested** - 24 comprehensive test cases
+✅ **Web Frontend** - Simple JavaScript UI for creating and managing escrows
 
 ## How It Works
 
@@ -47,10 +48,12 @@ forge test
 // Deploy the factory
 EscrowFactory factory = new EscrowFactory();
 
+// AssetType enum: NATIVE = 0, ERC20 = 1, ERC721 = 2, ERC1155 = 3
+
 // Create an escrow: 1 day duration, expecting 100 USDC
 address escrowAddr = factory.createEscrow(
     1 days,                     // Duration
-    Escrow.AssetType.ERC20,     // Payment type
+    Escrow.AssetType.ERC20,     // Payment type (1)
     address(usdcToken),         // Payment token
     0,                          // Token ID (for ERC721/1155)
     100 * 10**6                 // Payment amount (100 USDC)
@@ -87,7 +90,28 @@ escrow.process(address(usdc), buyer);
 // Buyer receives all 3 NFTs!
 ```
 
-### Example 3: NFT for NFT
+### Example 3: NFT for Native ETH
+
+```solidity
+// Create escrow expecting 1 ETH as payment
+address escrowAddr = factory.createEscrow(
+    1 days,
+    Escrow.AssetType.NATIVE,        // Native ETH (0)
+    address(0),                      // Use address(0) for ETH
+    0,
+    1 ether                          // Payment amount
+);
+
+// Seller deposits NFT
+nft.safeTransferFrom(seller, escrowAddr, tokenId);
+
+// Buyer sends ETH (automatically processed via receive hook)
+payable(escrowAddr).call{value: 1 ether}("");
+
+// Swap complete! Buyer receives NFT, seller receives ETH
+```
+
+### Example 4: NFT for NFT
 
 ```solidity
 // Create escrow expecting NFT #42 as payment
@@ -108,7 +132,7 @@ bayc.safeTransferFrom(buyer, escrowAddr, 42);
 // Swap complete!
 ```
 
-### Example 4: DAO Purchase
+### Example 5: DAO Purchase
 
 ```solidity
 // DAO creates escrow for an NFT purchase
@@ -130,7 +154,7 @@ nft.safeTransferFrom(seller, escrowAddr, tokenId);
 // DAO receives the NFT!
 ```
 
-### Example 5: Expired Escrow
+### Example 6: Expired Escrow
 
 ```solidity
 // Seller deposits NFT
@@ -149,12 +173,13 @@ escrow.withdrawExpired();
 ### Escrow.sol
 
 Single-use escrow contract for atomic swaps. Supports:
-- ERC20, ERC721, and ERC1155 tokens
+- Native ETH, ERC20, ERC721, and ERC1155 tokens
 - Multiple asset deposits
-- Automatic payment detection
+- Automatic payment detection via receiver hooks
 - Time-locked expiry
 
 **Key Functions:**
+- `receive()` - Auto-process native ETH deposits/payments
 - `process(token, depositor)` - Process ERC20 deposits/payments
 - `withdrawExpired()` - Return assets after expiry
 - `onERC721Received()` / `onERC1155Received()` - Auto-handle NFTs
@@ -166,6 +191,24 @@ Factory for deploying minimal proxy clones of escrow contracts.
 **Key Functions:**
 - `createEscrow(duration, paymentType, token, tokenId, amount)` - Deploy new escrow
 - `getEscrow(escrowId)` - Get escrow address by ID
+
+## Web Frontend
+
+A simple JavaScript frontend (`index.html`) is included for easy interaction:
+
+- **Create Escrow** - Deploy new escrow contracts with payment parameters
+- **My Escrows** - View all escrows you've created with status and addresses
+- **Dynamic Form** - Shows only relevant fields based on asset type
+- **MetaMask Integration** - Connect wallet and sign transactions
+
+To use:
+1. Start a local Ethereum node (e.g., Anvil: `anvil`)
+2. Deploy the factory: `forge script script/Deploy.s.sol --rpc-url http://localhost:8545 --broadcast`
+3. Open `index.html` in a browser
+4. Connect MetaMask to your local network
+5. Create escrows and copy addresses to share with trading partners
+
+Users can then send assets directly to the escrow address using MetaMask or any wallet.
 
 ## Security
 
@@ -187,11 +230,15 @@ Factory for deploying minimal proxy clones of escrow contracts.
 ```
 swapEscrow/
 ├── src/
-│   ├── Escrow.sol         # Main escrow contract
-│   └── EscrowFactory.sol  # Factory for deploying escrows
+│   ├── Escrow.sol          # Main escrow contract
+│   └── EscrowFactory.sol   # Factory for deploying escrows
+├── script/
+│   └── Deploy.s.sol        # Deployment script
 ├── test/
-│   ├── Escrow.t.sol       # Escrow tests
-│   └── EscrowFactory.t.sol # Factory tests
+│   ├── Escrow.t.sol        # Escrow tests (24 tests)
+│   └── EscrowFactory.t.sol # Factory tests (8 tests)
+├── deployments/            # Deployment addresses by chain ID
+├── index.html              # Web frontend
 ├── lib/                    # Dependencies (forge-std, OpenZeppelin)
 └── foundry.toml            # Foundry config
 ```
